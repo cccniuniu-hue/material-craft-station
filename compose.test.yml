@@ -1,0 +1,53 @@
+# Run from this directory with Docker Compose v2. No host Node, Java or Python needed.
+services:
+  frontend-check:
+    image: node:22-bookworm
+    profiles: [checks, frontend-check]
+    working_dir: /workspace
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - ./frontend:/source:ro
+      - npm-cache:/root/.npm
+    command:
+      - bash
+      - -euc
+      - |
+        set -o pipefail
+        tar -C /source --exclude=node_modules --exclude=.next --exclude=.npm-cache --exclude=.m2 --exclude=.tools --exclude=.references -cf - . | tar -C /workspace -xf -
+        npm ci
+        npm run lint
+        npm run typecheck
+        npm test
+        npm run build
+
+  backend-check:
+    image: maven:3.9-eclipse-temurin-17
+    profiles: [checks, backend-check]
+    working_dir: /workspace
+    volumes:
+      - ./backend:/source:ro
+      - maven-cache:/root/.m2
+    command:
+      - bash
+      - -euc
+      - |
+        set -o pipefail
+        tar -C /source --exclude=target --exclude=.npm-cache --exclude=.m2 --exclude=.tools --exclude=.references -cf - . | tar -C /workspace -xf -
+        mvn --batch-mode --no-transfer-progress verify
+
+  smoke:
+    image: python:3.12-alpine
+    profiles: [smoke]
+    environment:
+      BASE_URL: http://frontend:3000
+    volumes:
+      - ./scripts/smoke.py:/smoke.py:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+    command: [python, -u, /smoke.py]
+
+volumes:
+  npm-cache:
+  maven-cache:

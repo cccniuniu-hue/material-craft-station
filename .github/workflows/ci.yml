@@ -1,0 +1,54 @@
+name: Verify material workshop
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    container: node:22-bookworm
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    container: maven:3.9-eclipse-temurin-17
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - run: mvn --batch-mode --no-transfer-progress verify
+
+  integration:
+    needs: [frontend, backend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start MySQL, Java and Next.js
+        run: docker compose -f docker-compose.yml -f compose.test.yml up --build --detach --wait --wait-timeout 240
+      - name: Verify HTTP workflow through the Next.js proxy
+        run: docker compose -f docker-compose.yml -f compose.test.yml --profile smoke run --rm smoke
+      - name: Capture service logs
+        if: always()
+        run: docker compose -f docker-compose.yml -f compose.test.yml logs --no-color
+      - name: Remove integration environment
+        if: always()
+        run: docker compose -f docker-compose.yml -f compose.test.yml down --volumes --remove-orphans
